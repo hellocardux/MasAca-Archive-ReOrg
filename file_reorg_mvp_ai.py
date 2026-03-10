@@ -1627,7 +1627,7 @@ class App(tk.Tk):
                 self.records = records
                 self.after(0, self._scan_done)
             except Exception as e:
-                self.after(0, lambda: self._show_error("Errore scansione", e))
+                self.after(0, lambda err=e: self._show_error("Errore scansione", err))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1705,7 +1705,7 @@ class App(tk.Tk):
                 self.last_ai_strategic = result.get("strategic")
                 self.after(0, lambda: self._apply_ai_result(root, result))
             except Exception as e:
-                self.after(0, lambda: self._show_error("Errore AI", e))
+                self.after(0, lambda err=e: self._show_error("Errore AI", err))
 
         threading.Thread(target=worker, daemon=True).start()
 
