@@ -4,6 +4,30 @@
 
 Desktop application (Python + Tkinter) che combina un motore di regole locali con l'AI di OpenAI per analizzare, pianificare e riorganizzare file e cartelle su filesystem Windows. Pensato per archivi aziendali di grandi dimensioni dove la classificazione manuale sarebbe proibitiva.
 
+## Il Concetto: Intelligenza Ibrida e Profili Organizzativi
+
+Riorganizzare decine di migliaia di file è un lavoro troppo complesso per essere fatto totalmente a mano, ma troppo critico per essere affidato ciecamente a un'intelligenza artificiale.
+
+Questo tool usa un approccio ibrido guidato da un **Profilo Organizzativo**:
+
+1. **Il Profilo (Regole Locali Fast-Pass):** Il tool applica regole deterministiche per identificare pattern ovvi, guidate dal profilo attivo.
+2. **Lo Strato AI (LLM):** Per i file ambigui, l'AI analizza metadati e modello concettuale, proponendo decisioni.
+3. **Controllo Umano & Dry Run:** L'operatore revisiona il piano. Niente tocca i file senza approvazione esplicita.
+
+La riorganizzazione non consiste nello smistare tutto ovunque, ma nel ridurre la frizione cognitiva. Il profilo di default (*Maserati Academy*) si basa su:
+* Nomi parlanti.
+* Pochi punti di ingresso (7 cartelle principali).
+* Regole ovvie anche per chi arriva da fuori.
+
+Queste sono le 7 cartelle del profilo di default:
+- `01_Management`: Governance, strategia, team, vendor.
+- `02_Training_Projects`: Progetti di formazione in fase di design.
+- `03_Training_Delivery`: Erogazione dei corsi (partecipanti, feedback).
+- `04_Reports_and_Budget`: Dati finanziari, survey, KPI.
+- `05_Shared_Resources`: Asset riutilizzabili, linee guida, template.
+- `90_Archive`: Progetti e documenti chiusi.
+- `99_Inbox`: Triage (file da valutare) o arrivi temporanei.
+
 ---
 
 ## ✨ Funzionalità principali

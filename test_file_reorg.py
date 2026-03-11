@@ -17,8 +17,10 @@ from file_reorg_mvp_ai import (
     RuleEngine,
     Planner,
     OperationExecutor,
+    OperationExecutor,
     OperationPlan,
-    DEFAULT_RULES,
+    _DEFAULT_PROFILE,
+    OrganizationProfile,
 )
 
 
@@ -130,16 +132,16 @@ class TestRuleEngine(unittest.TestCase):
         )
 
     def test_default_rules_loaded(self):
-        engine = RuleEngine()
+        engine = RuleEngine(_DEFAULT_PROFILE.rules)
         self.assertTrue(len(engine.rules) > 0)
 
     def test_rules_sorted_by_priority(self):
-        engine = RuleEngine()
+        engine = RuleEngine(_DEFAULT_PROFILE.rules)
         priorities = [r.get("priority", 9999) for r in engine.rules]
         self.assertEqual(priorities, sorted(priorities))
 
     def test_attendance_rule(self):
-        engine = RuleEngine()
+        engine = RuleEngine(_DEFAULT_PROFILE.rules)
         record = self._make_record(
             source_path="C:\\root\\Attendance Report\\Q1.xlsx",
             name="Q1.xlsx",
@@ -149,29 +151,29 @@ class TestRuleEngine(unittest.TestCase):
         record.relative_path = "Attendance Report\\Q1.xlsx"
         engine.apply(record)
         self.assertEqual(record.suggested_action, "move")
-        self.assertIn("Attendance", record.suggested_target_rel)
+        self.assertIn("Reports", record.suggested_target_rel)
 
     def test_root_file_flags(self):
-        engine = RuleEngine()
+        engine = RuleEngine(_DEFAULT_PROFILE.rules)
         record = self._make_record(top_folder="[ROOT]")
         engine.apply(record)
         self.assertIn("root_file", record.risk_flags)
 
     def test_suspicious_name_flags(self):
-        engine = RuleEngine()
+        engine = RuleEngine(_DEFAULT_PROFILE.rules)
         record = self._make_record(name="doc copy.xlsx")
         engine.apply(record)
         self.assertIn("version_or_duplicate_pattern", record.risk_flags)
 
     def test_long_path_flags(self):
-        engine = RuleEngine()
+        engine = RuleEngine(_DEFAULT_PROFILE.rules)
         long_path = "C:\\" + "a" * 250 + "\\file.xlsx"
         record = self._make_record(source_path=long_path)
         engine.apply(record)
         self.assertIn("long_path_risk", record.risk_flags)
 
     def test_save_and_load_rules(self):
-        engine = RuleEngine()
+        engine = RuleEngine(_DEFAULT_PROFILE.rules)
         tmp = Path(tempfile.gettempdir()) / "__test_rules.json"
         try:
             engine.save_rules(tmp)
@@ -184,7 +186,7 @@ class TestRuleEngine(unittest.TestCase):
 
 class TestPlanner(unittest.TestCase):
     def test_move_action_target(self):
-        engine = RuleEngine()
+        engine = RuleEngine(_DEFAULT_PROFILE.rules)
         planner = Planner(engine)
         root = Path("C:\\TestRoot")
 
@@ -261,6 +263,22 @@ class TestOperationExecutor(unittest.TestCase):
         executor.execute(plans, dry_run=False)
         self.assertFalse(src.exists(), "Source should be gone after real run")
         self.assertTrue(dst_path.exists(), "Target should exist after real run")
+
+
+class TestOrganizationProfile(unittest.TestCase):
+    def test_default_profile_top_levels(self):
+        top_levels = _DEFAULT_PROFILE.top_level_names()
+        self.assertIn("01_Management", top_levels)
+        self.assertIn("99_Inbox", top_levels)
+        self.assertEqual(len(top_levels), 7)
+
+    def test_profile_serialization(self):
+        data = _DEFAULT_PROFILE.to_dict()
+        loaded = OrganizationProfile.from_dict(data)
+        self.assertEqual(loaded.name, _DEFAULT_PROFILE.name)
+        self.assertEqual(len(loaded.folders), len(_DEFAULT_PROFILE.folders))
+        self.assertEqual(len(loaded.rules), len(_DEFAULT_PROFILE.rules))
+        self.assertEqual(loaded.folders[0].name, _DEFAULT_PROFILE.folders[0].name)
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 
 
 APP_NAME = "File Reorganization MVP + AI"
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.5.0"
 
 # =========================
 # Logging Setup
@@ -46,27 +46,281 @@ _ch.setLevel(logging.INFO)
 _ch.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
 logger.addHandler(_ch)
 
-DEFAULT_TOP_LEVELS = [
-    "01_Operations",
-    "02_Finance",
-    "03_Training_Programs",
-    "04_Reporting_KPI",
-    "05_Repository_Content",
-    "06_Communications",
-    "07_Teams_Exports",
-    "90_Archive",
-    "99_Temporary",
-]
+# =========================
+# Organization Profile
+# =========================
 
-DEFAULT_OBJECTIVES = (
-    "Primary context: mostly work files, rarely personal. "
-    "Goal: archival order and future simplification. "
-    "Files and folders must be easy to find even for people who do not know the original structure. "
-    "Primary navigation logic: project, topic, date. "
-    "The AI must propose a plan, not execute filesystem changes. "
-    "When confidence is low, prefer review instead of risky moves. "
-    "Keep the top-level structure semi-constrained to the allowed top-level folders."
-)
+@dataclass
+class FolderDefinition:
+    """Describes one top-level folder in the organization model."""
+    name: str
+    description: str
+    question: str
+    contains: List[str] = field(default_factory=list)
+    not_contains: List[str] = field(default_factory=list)
+    examples: List[str] = field(default_factory=list)
+    subfolders: List[str] = field(default_factory=list)
+
+
+@dataclass
+class OrganizationProfile:
+    """A complete, serializable organizational model for folder reorganization."""
+    name: str
+    description: str
+    folders: List[FolderDefinition] = field(default_factory=list)
+    rules: List[dict] = field(default_factory=list)
+    objectives: str = ""
+    decision_guide: List[Dict[str, str]] = field(default_factory=list)
+
+    def top_level_names(self):
+        return [f.name for f in self.folders]
+
+    def archive_subfolders(self):
+        """Mirror active folder names inside the archive folder."""
+        archive = None
+        active = []
+        for f in self.folders:
+            if f.name.startswith("90_"):
+                archive = f
+            elif not f.name.startswith("99_"):
+                active.append(f.name.split("_", 1)[-1] if "_" in f.name else f.name)
+        return active
+
+    def to_dict(self):
+        return {
+            "name": self.name,
+            "description": self.description,
+            "folders": [asdict(f) for f in self.folders],
+            "rules": self.rules,
+            "objectives": self.objectives,
+            "decision_guide": self.decision_guide,
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        folders = [FolderDefinition(**fd) for fd in data.get("folders", [])]
+        return cls(
+            name=data.get("name", "Custom"),
+            description=data.get("description", ""),
+            folders=folders,
+            rules=data.get("rules", []),
+            objectives=data.get("objectives", ""),
+            decision_guide=data.get("decision_guide", []),
+        )
+
+
+def build_default_masaca_profile():
+    """Build the default Maserati Academy organization profile (simplified 7-folder model)."""
+    folders = [
+        FolderDefinition(
+            name="01_Management",
+            description="Tutto ciò che serve a gestire l'Academy come funzione.",
+            question="Questo file serve a organizzare il lavoro interno dell'Academy?",
+            contains=["planning", "meeting note", "processi", "calendario", "documenti organizzativi",
+                      "decisioni", "governance", "SOP", "ruoli e responsabilità", "operating model"],
+            not_contains=["contenuto formativo", "erogazione training", "report numerici", "budget"],
+            examples=["annual planning Academy", "process map LMS", "weekly management meeting notes",
+                      "ruoli e responsabilità", "operating model"],
+            subfolders=["Planning", "Meetings", "Processes", "Calendars"],
+        ),
+        FolderDefinition(
+            name="02_Training_Projects",
+            description="Tutto ciò che riguarda la creazione o revisione di training.",
+            question="Questo file serve a costruire o aggiornare un contenuto formativo?",
+            contains=["storyboard", "bozze deck", "source content", "input SME",
+                      "review comments", "master file finali", "brief", "development"],
+            not_contains=["logistica erogazione", "liste partecipanti sessione", "budget"],
+            examples=["deck finale training Grecale", "storyboard modulo Aftersales",
+                      "brief nuovo corso Commercial", "review comments MC20"],
+            subfolders=["Commercial", "Aftersales_Technical", "Luxury_Customer_Experience", "Cross_Academy"],
+        ),
+        FolderDefinition(
+            name="03_Training_Delivery",
+            description="Tutto ciò che serve a erogare concretamente il training.",
+            question="Questo file serve a organizzare o supportare una sessione/training già in campo?",
+            contains=["session planning", "liste partecipanti", "calendari training",
+                      "materiale per trainer", "logistica", "deployment per region",
+                      "comunicazioni operative ai dealer"],
+            not_contains=["sviluppo contenuti", "storyboard", "budget"],
+            examples=["lista partecipanti sessione APAC", "calendario training Q2",
+                      "trainer guide sessione virtuale", "comunicazione dealer EMEA"],
+            subfolders=["Global", "Regions", "Virtual", "In_Person"],
+        ),
+        FolderDefinition(
+            name="04_Reports_and_Budget",
+            description="Tutto ciò che serve a misurare, controllare, rendicontare.",
+            question="Questo file serve per numeri, performance, budget o controllo?",
+            contains=["attendance report", "completion report", "KPI", "dashboard export",
+                      "survey result", "budget", "invoice", "forecast", "vendor financial tracking"],
+            not_contains=["contenuto formativo", "logistica"],
+            examples=["report mensile attendance", "budget Q3 2025", "KPI dashboard export",
+                      "invoice vendor training"],
+            subfolders=["Reports", "Budget"],
+        ),
+        FolderDefinition(
+            name="05_Shared_Resources",
+            description="Tutto ciò che viene riusato da tutti.",
+            question="Questo file è un materiale standard, riutilizzabile o di supporto?",
+            contains=["template", "asset grafici", "loghi", "immagini", "icone",
+                      "standard", "linee guida", "modelli Excel/PPT/Word",
+                      "naming conventions", "checklist"],
+            not_contains=["file specifico di un progetto", "report", "budget"],
+            examples=["template email dealer invitation", "logo Maserati",
+                      "linee guida brand", "checklist pre-sessione"],
+            subfolders=["Templates", "Brand_Assets", "Guidelines", "Tools"],
+        ),
+        FolderDefinition(
+            name="90_Archive",
+            description="Tutto ciò che non è più attivo, ma va tenuto.",
+            question="Questo file serve ancora davvero nel lavoro corrente?",
+            contains=["materiale non più attivo", "progetti chiusi", "versioni superate"],
+            not_contains=["file attivi", "file in lavorazione"],
+            examples=["training Levante 2022", "vecchio operating model",
+                      "report annuale 2021"],
+            subfolders=["Management", "Training_Projects", "Training_Delivery",
+                        "Reports_and_Budget", "Shared_Resources"],
+        ),
+        FolderDefinition(
+            name="99_Inbox",
+            description="File appena arrivati, scaricati, esportati, ricevuti. Zona di transito.",
+            question="Non so ancora dove va, ma so che non deve restare in desktop o in root.",
+            contains=["file appena ricevuti", "download", "export da Teams", "file da classificare"],
+            not_contains=["file già classificati"],
+            examples=["allegato email appena ricevuto", "export chat Teams",
+                      "file scaricato da SharePoint"],
+            subfolders=[],
+        ),
+    ]
+
+    rules = [
+        {
+            "name": "Attendance Report",
+            "priority": 10,
+            "condition": {"path_contains": ["Attendance Report", "attendance"]},
+            "action": "move",
+            "target_rel": r"04_Reports_and_Budget\Reports\Attendance"
+        },
+        {
+            "name": "KPI Report",
+            "priority": 15,
+            "condition": {"path_contains": ["KPI", "dashboard", "completion report"]},
+            "action": "move",
+            "target_rel": r"04_Reports_and_Budget\Reports"
+        },
+        {
+            "name": "Budget Finance",
+            "priority": 20,
+            "condition": {"path_contains": ["Budget & Finance", "Budget", "invoice", "forecast"]},
+            "action": "move",
+            "target_rel": r"04_Reports_and_Budget\Budget"
+        },
+        {
+            "name": "Operations Management",
+            "priority": 30,
+            "condition": {"path_contains": ["Operations", "Management", "Planning", "SOP"]},
+            "action": "move",
+            "target_rel": r"01_Management"
+        },
+        {
+            "name": "Teams Exports",
+            "priority": 40,
+            "condition": {"path_contains": ["File di chat di Microsoft Teams"]},
+            "action": "move",
+            "target_rel": r"99_Inbox"
+        },
+        {
+            "name": "Training Delivery",
+            "priority": 45,
+            "condition": {"path_contains": ["Delivery", "session planning", "partecipanti", "trainer guide"]},
+            "action": "move",
+            "target_rel": r"03_Training_Delivery"
+        },
+        {
+            "name": "Archive Backup or OLD",
+            "priority": 50,
+            "condition": {"path_contains": ["Backup", r"\\OLD\\", r"\\old\\"]},
+            "action": "archive",
+            "target_rel": r"90_Archive"
+        },
+        {
+            "name": "Academy Training Content",
+            "priority": 60,
+            "condition": {"path_contains": ["Academy - Documenti", "Training_Projects", "storyboard"]},
+            "action": "move",
+            "target_rel": r"02_Training_Projects"
+        },
+        {
+            "name": "Templates and Resources",
+            "priority": 65,
+            "condition": {"path_contains": ["Template", "template", "Brand_Assets", "Guidelines", "linee guida"]},
+            "action": "move",
+            "target_rel": r"05_Shared_Resources"
+        },
+        {
+            "name": "Root files",
+            "priority": 70,
+            "condition": {"top_folder_is": "[ROOT]"},
+            "action": "review",
+            "target_rel": r"99_Inbox"
+        },
+        {
+            "name": "Media to Shared Resources",
+            "priority": 80,
+            "condition": {"extension_in": [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp"]},
+            "action": "move",
+            "target_rel": r"05_Shared_Resources\Brand_Assets"
+        },
+        {
+            "name": "Fallback docs",
+            "priority": 999,
+            "condition": {"extension_in": [".xlsx", ".xls", ".xlsm", ".csv", ".docx", ".doc", ".pdf", ".pptx", ".ppt", ".txt", ".msg"]},
+            "action": "review",
+            "target_rel": r"99_Inbox"
+        }
+    ]
+
+    objectives = (
+        "Primary context: Maserati Academy training department. "
+        "Goal: simplified and human-readable folder organization with exactly 7 top-level folders. "
+        "File placement follows a simple question-based decision model. "
+        "Teams (Commercial, Aftersales_Technical, Luxury_Customer_Experience, Cross_Academy) "
+        "are subfolders of 02_Training_Projects, not top-level. "
+        "Operations is a cross-cutting function, primarily living in 01_Management, 03_Training_Delivery, and 04_Reports_and_Budget. "
+        "When unsure, use 99_Inbox. Never leave files in root. "
+        "Reduce cognitive friction: use human-readable names, few entry points, obvious rules. "
+        "The AI must propose a plan, not execute filesystem changes. "
+        "When confidence is low, prefer review instead of risky moves."
+    )
+
+    decision_guide = [
+        {"question": "Serve a gestire il lavoro interno Academy?", "folder": "01_Management"},
+        {"question": "Serve a creare o aggiornare un training?", "folder": "02_Training_Projects"},
+        {"question": "Serve a erogare un training?", "folder": "03_Training_Delivery"},
+        {"question": "Serve a misurare o rendicontare?", "folder": "04_Reports_and_Budget"},
+        {"question": "Serve come risorsa comune riutilizzabile?", "folder": "05_Shared_Resources"},
+        {"question": "Non è più attivo ma va conservato?", "folder": "90_Archive"},
+        {"question": "È appena arrivato e va classificato?", "folder": "99_Inbox"},
+    ]
+
+    return OrganizationProfile(
+        name="Maserati Academy",
+        description=(
+            "Modello semplificato a 7 cartelle per la Maserati Academy. "
+            "Struttura parlante, pochi punti di ingresso, regole ovvie anche per chi arriva da fuori."
+        ),
+        folders=folders,
+        rules=rules,
+        objectives=objectives,
+        decision_guide=decision_guide,
+    )
+
+
+# Build defaults from profile
+_DEFAULT_PROFILE = build_default_masaca_profile()
+
+DEFAULT_TOP_LEVELS = _DEFAULT_PROFILE.top_level_names()
+
+DEFAULT_OBJECTIVES = _DEFAULT_PROFILE.objectives
 
 
 # =========================
@@ -106,8 +360,9 @@ class OperationPlan:
 
 @dataclass
 class AISettings:
+    provider: str = "OpenAI"
     api_key: str = ""
-    model: str = "gpt-5.4"
+    model: str = "gpt-4o"
     max_chunk_size: int = 180
     confidence_threshold: float = 0.72
     include_size: bool = True
@@ -199,71 +454,7 @@ def chunk_list(items, size):
 # Rule Engine
 # =========================
 
-DEFAULT_RULES = [
-    {
-        "name": "Attendance Report",
-        "priority": 10,
-        "condition": {"path_contains": ["Attendance Report"]},
-        "action": "move",
-        "target_rel": r"04_Reporting_KPI\Attendance"
-    },
-    {
-        "name": "Budget Finance",
-        "priority": 20,
-        "condition": {"path_contains": ["Budget & Finance"]},
-        "action": "move",
-        "target_rel": r"02_Finance"
-    },
-    {
-        "name": "Operations",
-        "priority": 30,
-        "condition": {"path_contains": ["Operations"]},
-        "action": "move",
-        "target_rel": r"01_Operations"
-    },
-    {
-        "name": "Teams Exports",
-        "priority": 40,
-        "condition": {"path_contains": ["File di chat di Microsoft Teams"]},
-        "action": "move",
-        "target_rel": r"07_Teams_Exports"
-    },
-    {
-        "name": "Archive Backup or OLD",
-        "priority": 50,
-        "condition": {"path_contains": ["Backup", r"\\OLD\\", r"\\old\\"]},
-        "action": "archive",
-        "target_rel": r"90_Archive"
-    },
-    {
-        "name": "Academy Documents",
-        "priority": 60,
-        "condition": {"path_contains": ["Academy - Documenti"]},
-        "action": "move",
-        "target_rel": r"05_Repository_Content"
-    },
-    {
-        "name": "Root files",
-        "priority": 70,
-        "condition": {"top_folder_is": "[ROOT]"},
-        "action": "review",
-        "target_rel": r"99_Temporary\Root_Review"
-    },
-    {
-        "name": "Media to Communications",
-        "priority": 80,
-        "condition": {"extension_in": [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp"]},
-        "action": "move",
-        "target_rel": r"06_Communications\Media"
-    },
-    {
-        "name": "Fallback docs",
-        "priority": 999,
-        "condition": {"extension_in": [".xlsx", ".xls", ".xlsm", ".csv", ".docx", ".doc", ".pdf", ".pptx", ".ppt", ".txt", ".msg"]},
-        "action": "review",
-        "target_rel": r"99_Temporary\Needs_Classification"
-    }
-]
+DEFAULT_RULES = _DEFAULT_PROFILE.rules
 
 
 class RuleEngine(object):
@@ -419,7 +610,7 @@ class Planner(object):
             return normalize_rel_path(base + "\\" + record.name)
 
         if record.suggested_action == "review":
-            base = normalize_rel_path(record.suggested_target_rel or r"99_Temporary\Needs_Classification")
+            base = normalize_rel_path(record.suggested_target_rel or r"99_Inbox")
             return normalize_rel_path(base + "\\" + record.name)
 
         if record.suggested_action == "quarantine":
@@ -436,17 +627,26 @@ class Planner(object):
 # AI Layer
 # =========================
 
-class OpenAIResponsesClient(object):
-    def __init__(self, api_key, model):
+class AIClient(object):
+    def __init__(self, provider, api_key, model):
+        self.provider = provider.strip()
         self.api_key = api_key.strip()
         self.model = model.strip()
 
     def responses_structured(self, system_prompt, user_payload, schema_name, schema):
         if not self.api_key:
-            raise ValueError("Missing OpenAI API key.")
+            raise ValueError("Missing API key.")
         if not self.model:
             raise ValueError("Missing model name.")
 
+        if self.provider == "OpenAI":
+            return self._openai_request(system_prompt, user_payload, schema_name, schema)
+        elif self.provider == "OpenRouter":
+            return self._openrouter_request(system_prompt, user_payload, schema_name, schema)
+        else:
+            raise ValueError("Unsupported AI provider: %s" % self.provider)
+
+    def _openai_request(self, system_prompt, user_payload, schema_name, schema):
         payload = {
             "model": self.model,
             "input": [
@@ -537,11 +737,111 @@ class OpenAIResponsesClient(object):
 
         raise RuntimeError("Could not parse structured OpenAI response.")
 
+    def _openrouter_request(self, system_prompt, user_payload, schema_name, schema):
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": system_prompt
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(user_payload, ensure_ascii=False)
+                }
+            ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema_name,
+                    "strict": True,
+                    "schema": schema
+                }
+            }
+        }
+
+        data = json.dumps(payload).encode("utf-8")
+
+        max_retries = 3
+        retry_delays = [5, 15, 30]
+        last_error = None
+
+        for attempt in range(max_retries):
+            request = urllib.request.Request(
+                url="https://openrouter.ai/api/v1/chat/completions",
+                data=data,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer " + self.api_key,
+                    "HTTP-Referer": "https://github.com/mcard/DirReOrg", # Required by OpenRouter
+                    "X-Title": "DirReOrg AI Analyzer"
+                },
+                method="POST"
+            )
+
+            try:
+                with urllib.request.urlopen(request, timeout=180) as response:
+                    raw = response.read().decode("utf-8")
+                logger.debug("OpenRouter response received (%d bytes) on attempt %d.", len(raw), attempt + 1)
+                last_error = None
+                break
+            except urllib.error.HTTPError as e:
+                detail = e.read().decode("utf-8", errors="replace")
+                if e.code in (429, 500, 502, 503) and attempt < max_retries - 1:
+                    wait = retry_delays[attempt]
+                    logger.warning("OpenRouter HTTPError %s (attempt %d/%d). Retry in %ds...",
+                                   e.code, attempt + 1, max_retries, wait)
+                    time.sleep(wait)
+                    last_error = RuntimeError("OpenRouter HTTPError %s: %s" % (e.code, detail))
+                    continue
+                logger.error("OpenRouter HTTPError %s: %s", e.code, detail)
+                raise RuntimeError("OpenRouter HTTPError %s: %s" % (e.code, detail))
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait = retry_delays[attempt]
+                    logger.warning("OpenRouter request failed (attempt %d/%d): %s. Retry in %ds...",
+                                   attempt + 1, max_retries, e, wait)
+                    time.sleep(wait)
+                    last_error = RuntimeError("OpenRouter request failed: %s" % e)
+                    continue
+                logger.error("OpenRouter request failed after %d attempts: %s", max_retries, e)
+                raise RuntimeError("OpenRouter request failed: %s" % e)
+
+        if last_error:
+            raise last_error
+
+        response_json = json.loads(raw)
+
+        try:
+            content = response_json["choices"][0]["message"]["content"]
+            if content.startswith("```json"):
+                content = content[7:-3].strip()
+            return json.loads(content)
+        except (KeyError, IndexError, json.JSONDecodeError) as e:
+            logger.error("Failed to parse OpenRouter response: %s\nRaw response: %s", e, raw)
+            raise RuntimeError("Could not parse structured OpenRouter response.")
+
 
 class AIPlanner(object):
-    def __init__(self, settings):
+    def __init__(self, settings, profile=None):
         self.settings = settings
-        self.client = OpenAIResponsesClient(settings.api_key, settings.model)
+        self.profile = profile or _DEFAULT_PROFILE
+        self.client = AIClient(settings.provider, settings.api_key, settings.model)
+
+    def _folder_context_text(self):
+        """Build a textual description of the folder model for AI prompts."""
+        lines = ["FOLDER MODEL (%s):" % self.profile.name]
+        for f in self.profile.folders:
+            lines.append("- %s: %s" % (f.name, f.description))
+            if f.subfolders:
+                lines.append("  Subfolders: %s" % ", ".join(f.subfolders))
+            if f.examples:
+                lines.append("  Examples: %s" % "; ".join(f.examples[:4]))
+        lines.append("")
+        lines.append("DECISION GUIDE (ask in order):")
+        for item in self.profile.decision_guide:
+            lines.append("- %s -> %s" % (item["question"], item["folder"]))
+        return "\n".join(lines)
 
     def strategic_schema(self):
         return {
@@ -646,7 +946,7 @@ class AIPlanner(object):
 
         summary = {
             "total_files": len(records),
-            "allowed_top_levels": DEFAULT_TOP_LEVELS,
+            "allowed_top_levels": self.profile.top_level_names(),
             "global_extension_counts": ext_counts,
             "modified_range": {"min": date_min, "max": date_max},
             "top_folder_summary": top_folders
@@ -656,12 +956,17 @@ class AIPlanner(object):
     def strategic_pass(self, records, objectives):
         summary = self.build_inventory_summary(records)
 
+        folder_context = self._folder_context_text()
+
         system_prompt = (
-            "You are a file-organization analyst. "
+            "You are a file-organization analyst for a corporate training department. "
             "Your job is to propose a clean reorganization strategy for work documents. "
             "Never propose destructive actions. "
-            "Stay within the provided allowed top-level folders unless absolutely necessary, and if uncertain use 99_Temporary. "
-            "Focus on archival clarity, future maintainability, and findability by people unfamiliar with the old structure."
+            "Stay within the provided allowed top-level folders. When uncertain, use 99_Inbox. "
+            "Focus on reducing cognitive friction: human-readable names, few entry points, obvious rules. "
+            "Focus on archival clarity, future maintainability, and findability by people unfamiliar with the old structure.\n\n"
+            "CRITICAL: All notes, strategic explanations, and reasons MUST be written in Italian.\n\n"
+            + folder_context
         )
 
         user_payload = {
@@ -693,20 +998,25 @@ class AIPlanner(object):
                 item["modified_at"] = record.modified_at
             compact_records.append(item)
 
+        folder_context = self._folder_context_text()
+
         system_prompt = (
-            "You are a file reorganization planner. "
+            "You are a file reorganization planner for a corporate training department. "
             "For each file, propose an action and a target relative path. "
             "Use only these actions: move, archive, review, quarantine, rename. "
             "Default to review when confidence is low or ambiguity is high. "
-            "Do not invent filesystem changes outside the allowed top-level structure unless absolutely necessary. "
+            "Do not invent filesystem changes outside the allowed top-level structure. "
             "Target paths must include the filename. "
             "Do not change filename unless there is a very strong reason. "
-            "This is only a proposal, not execution."
+            "This is only a proposal, not execution.\n\n"
+            "CRITICAL: The 'reason' field MUST be written in Italian. Explain your choice in brief Italian.\n\n"
+            + folder_context
         )
 
         user_payload = {
             "objectives": objectives,
-            "allowed_top_levels": DEFAULT_TOP_LEVELS,
+            "allowed_top_levels": self.profile.top_level_names(),
+            "decision_guide": self.profile.decision_guide,
             "strategic_plan": strategic_plan,
             "records": compact_records
         }
@@ -967,12 +1277,14 @@ def import_plan_csv(csv_path):
 # =========================
 
 class HelpWindow(tk.Toplevel):
-    def __init__(self, master):
+    def __init__(self, master, profile=None):
         tk.Toplevel.__init__(self, master)
         self.title("Guida - Come usare il tool")
-        self.geometry("980x760")
+        self.geometry("1020x820")
         self.transient(master)
         self.grab_set()
+
+        self.profile = profile or _DEFAULT_PROFILE
 
         container = ttk.Frame(self, padding=14)
         container.pack(fill="both", expand=True)
@@ -984,11 +1296,30 @@ class HelpWindow(tk.Toplevel):
         )
         title.pack(anchor="w", pady=(0, 10))
 
-        help_text = (
-            "A COSA SERVE\n"
-            "Questo tool ti aiuta a costruire e applicare un piano di riorganizzazione massiva dei file.\n"
-            "L'AI non sposta file: propone un piano. L'esecuzione resta locale.\n\n"
+        help_text = self._build_help_text()
 
+        text = tk.Text(container, wrap="word", font=("Segoe UI", 10))
+        text.pack(fill="both", expand=True)
+        text.insert("1.0", help_text)
+        text.config(state="disabled")
+
+        btns = ttk.Frame(container)
+        btns.pack(fill="x", pady=(10, 0))
+        ttk.Button(btns, text="Chiudi", command=self.destroy).pack(side="right")
+
+    def _build_help_text(self):
+        p = self.profile
+        sections = []
+
+        # Scope
+        sections.append(
+            "SCOPO DEL REPOSITORY\n"
+            "Profilo attivo: %s\n"
+            "%s\n\n" % (p.name, p.description)
+        )
+
+        # Workflow
+        sections.append(
             "FLUSSO CONSIGLIATO\n"
             "1. Seleziona la root\n"
             "2. Scansiona la cartella\n"
@@ -999,43 +1330,64 @@ class HelpWindow(tk.Toplevel):
             "7. Correggi manualmente le righe dubbie\n"
             "8. Esegui prima in Dry Run\n"
             "9. Solo dopo fai una prova reale su una porzione limitata\n\n"
+        )
 
+        # Folder descriptions
+        sections.append("STRUTTURA CARTELLE\n")
+        for f in p.folders:
+            sections.append("%s\n" % f.name)
+            sections.append("  %s\n" % f.description)
+            sections.append("  Domanda: %s\n" % f.question)
+            if f.subfolders:
+                sections.append("  Sottocartelle: %s\n" % ", ".join(f.subfolders))
+            if f.examples:
+                sections.append("  Esempi: %s\n" % "; ".join(f.examples[:4]))
+            sections.append("\n")
+
+        # Decision guide
+        sections.append("DOVE SALVARE UN FILE?\n")
+        for item in p.decision_guide:
+            sections.append("  %s \u2192 %s\n" % (item["question"], item["folder"]))
+        sections.append("\n")
+
+        # Rules
+        sections.append(
+            "REGOLE D'USO\n"
+            "\u2022 Niente file in root\n"
+            "\u2022 Niente nomi vaghi (\"varie\", \"temp\", \"stuff\")\n"
+            "\u2022 99_Inbox va svuotata periodicamente\n"
+            "\u2022 Versioni coerenti — evitare \"v2_final_FINAL\"\n"
+            "\u2022 Archivio separato — se il file non \u00e8 pi\u00f9 attivo, va in 90_Archive\n"
+            "\u2022 Usare la sottocartella progetto quando il file \u00e8 legato a un training specifico\n\n"
+        )
+
+        # Filing examples
+        sections.append(
+            "ESEMPI CONCRETI\n"
+            "\u2022 Deck finale training Grecale \u2192 02_Training_Projects\\Commercial\\Grecale\\Final\n"
+            "\u2022 Lista partecipanti sessione APAC \u2192 03_Training_Delivery\\Regions\\APAC\n"
+            "\u2022 Report mensile attendance \u2192 04_Reports_and_Budget\\Reports\n"
+            "\u2022 Template email dealer invitation \u2192 05_Shared_Resources\\Templates\n"
+            "\u2022 Vecchio training Levante 2022 \u2192 90_Archive\\Training_Projects\n"
+            "\u2022 Export chat Teams appena ricevuto \u2192 99_Inbox\n\n"
+        )
+
+        # AI + safety
+        sections.append(
             "COME FUNZIONA L'AI\n"
             "Passo strategico:\n"
-            "- riceve una sintesi dell'albero\n"
+            "- riceve una sintesi dell'albero e il modello cartelle\n"
             "- propone tassonomia e note strategiche\n\n"
             "Passo operativo:\n"
-            "- riceve chunk di file con metadati\n"
+            "- riceve chunk di file con metadati + guida decisionale\n"
             "- restituisce decisioni file-per-file con confidence e motivazione\n\n"
-
-            "COLONNE IMPORTANTI\n"
-            "- Action: move / archive / review / quarantine / rename\n"
-            "- Target proposto: destinazione relativa proposta\n"
-            "- Source dec.: rule / ai / manual\n"
-            "- Confidence: fiducia della proposta AI\n"
-            "- Reason: motivazione sintetica\n"
-            "- Rischi: segnali locali come backup_path, old_path, root_file\n\n"
-
-            "DRY RUN\n"
-            "Modalità simulata. Non tocca i file veri. Genera manifest e ti fa vedere cosa succederebbe.\n\n"
-
-            "ROLLBACK\n"
-            "Funziona sui manifest creati in esecuzione reale. Prima provalo sempre in dry-run.\n\n"
-
             "PRINCIPIO DI SICUREZZA\n"
             "AI = proposta.\n"
             "Motore locale = validazione + esecuzione.\n"
             "Questa separazione evita danni stupidi."
         )
 
-        text = tk.Text(container, wrap="word", font=("Segoe UI", 10))
-        text.pack(fill="both", expand=True)
-        text.insert("1.0", help_text)
-        text.config(state="disabled")
-
-        btns = ttk.Frame(container)
-        btns.pack(fill="x", pady=(10, 0))
-        ttk.Button(btns, text="Chiudi", command=self.destroy).pack(side="right")
+        return "".join(sections)
 
 
 class AISettingsDialog(tk.Toplevel):
@@ -1049,6 +1401,7 @@ class AISettingsDialog(tk.Toplevel):
         self.result = None
         self.settings = settings
 
+        self.provider_var = tk.StringVar(value=settings.provider)
         self.api_key_var = tk.StringVar(value=settings.api_key)
         self.model_var = tk.StringVar(value=settings.model)
         self.max_chunk_var = tk.StringVar(value=str(settings.max_chunk_size))
@@ -1060,35 +1413,60 @@ class AISettingsDialog(tk.Toplevel):
         frame = ttk.Frame(self, padding=14)
         frame.pack(fill="both", expand=True)
 
-        ttk.Label(frame, text="OpenAI API key:").grid(row=0, column=0, sticky="w", pady=4)
-        ttk.Entry(frame, textvariable=self.api_key_var, width=70, show="*").grid(row=0, column=1, sticky="ew", pady=4)
+        ttk.Label(frame, text="API Provider:").grid(row=0, column=0, sticky="w", pady=4)
+        self.provider_combo = ttk.Combobox(frame, textvariable=self.provider_var, values=["OpenAI", "OpenRouter"], state="readonly", width=30)
+        self.provider_combo.grid(row=0, column=1, sticky="w", pady=4)
+        self.provider_combo.bind("<<ComboboxSelected>>", self.on_provider_change)
 
-        ttk.Label(frame, text="Model:").grid(row=1, column=0, sticky="w", pady=4)
-        ttk.Entry(frame, textvariable=self.model_var, width=30).grid(row=1, column=1, sticky="w", pady=4)
+        ttk.Label(frame, text="API Key:").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Entry(frame, textvariable=self.api_key_var, width=70, show="*").grid(row=1, column=1, sticky="ew", pady=4)
 
-        ttk.Label(frame, text="Chunk size:").grid(row=2, column=0, sticky="w", pady=4)
-        ttk.Entry(frame, textvariable=self.max_chunk_var, width=12).grid(row=2, column=1, sticky="w", pady=4)
+        ttk.Label(frame, text="Model:").grid(row=2, column=0, sticky="w", pady=4)
+        self.model_combo = ttk.Combobox(frame, textvariable=self.model_var, width=40)
+        self.model_combo.grid(row=2, column=1, sticky="w", pady=4)
+        # Initialize model values based on current provider
+        self.on_provider_change()
 
-        ttk.Label(frame, text="Confidence threshold:").grid(row=3, column=0, sticky="w", pady=4)
-        ttk.Entry(frame, textvariable=self.threshold_var, width=12).grid(row=3, column=1, sticky="w", pady=4)
+        ttk.Label(frame, text="Chunk size:").grid(row=3, column=0, sticky="w", pady=4)
+        ttk.Entry(frame, textvariable=self.max_chunk_var, width=12).grid(row=3, column=1, sticky="w", pady=4)
 
-        ttk.Checkbutton(frame, text="Include size metadata", variable=self.include_size_var).grid(row=4, column=1, sticky="w", pady=4)
-        ttk.Checkbutton(frame, text="Include modified date metadata", variable=self.include_dates_var).grid(row=5, column=1, sticky="w", pady=4)
-        ttk.Checkbutton(frame, text="Enable strategic pass before file analysis", variable=self.strategic_var).grid(row=6, column=1, sticky="w", pady=4)
+        ttk.Label(frame, text="Confidence threshold:").grid(row=4, column=0, sticky="w", pady=4)
+        ttk.Entry(frame, textvariable=self.threshold_var, width=12).grid(row=4, column=1, sticky="w", pady=4)
+
+        ttk.Checkbutton(frame, text="Include size metadata", variable=self.include_size_var).grid(row=5, column=1, sticky="w", pady=4)
+        ttk.Checkbutton(frame, text="Include modified date metadata", variable=self.include_dates_var).grid(row=6, column=1, sticky="w", pady=4)
+        ttk.Checkbutton(frame, text="Enable strategic pass before file analysis", variable=self.strategic_var).grid(row=7, column=1, sticky="w", pady=4)
 
         note = (
             "Questo pannello configura solo il livello di proposta AI.\n"
             "L'esecuzione dei file rimane locale e separata."
         )
-        ttk.Label(frame, text=note, foreground="#555555").grid(row=7, column=0, columnspan=2, sticky="w", pady=(12, 8))
+        ttk.Label(frame, text=note, foreground="#555555").grid(row=8, column=0, columnspan=2, sticky="w", pady=(12, 8))
 
         btns = ttk.Frame(frame)
-        btns.grid(row=8, column=0, columnspan=2, sticky="e", pady=(18, 0))
+        btns.grid(row=9, column=0, columnspan=2, sticky="e", pady=(18, 0))
 
         ttk.Button(btns, text="Annulla", command=self.destroy).pack(side="right", padx=4)
         ttk.Button(btns, text="Salva", command=self.on_save).pack(side="right", padx=4)
 
         frame.columnconfigure(1, weight=1)
+
+    def on_provider_change(self, event=None):
+        provider = self.provider_var.get()
+        if provider == "OpenAI":
+            self.model_combo['values'] = ["gpt-4o", "gpt-4o-mini", "o1-mini", "o3-mini"]
+            if event: # Only autoselect if user triggered the change
+                self.model_var.set("gpt-4o")
+        elif provider == "OpenRouter":
+            self.model_combo['values'] = [
+                "openai/gpt-4o",
+                "openai/gpt-4o-mini",
+                "anthropic/claude-3.5-sonnet",
+                "google/gemini-2.5-flash",
+                "meta-llama/llama-3.3-70b-instruct"
+            ]
+            if event:
+                self.model_var.set("openai/gpt-4o")
 
     def on_save(self):
         try:
@@ -1099,6 +1477,7 @@ class AISettingsDialog(tk.Toplevel):
             return
 
         self.result = AISettings(
+            provider=self.provider_var.get().strip(),
             api_key=self.api_key_var.get().strip(),
             model=self.model_var.get().strip(),
             max_chunk_size=chunk_size,
@@ -1107,6 +1486,173 @@ class AISettingsDialog(tk.Toplevel):
             include_dates=self.include_dates_var.get(),
             strategic_enabled=self.strategic_var.get()
         )
+        self.destroy()
+
+
+class ProfileViewerDialog(tk.Toplevel):
+    """Dialog to view, export, import, and reset the organization profile."""
+    def __init__(self, master, profile):
+        tk.Toplevel.__init__(self, master)
+        self.title("\U0001F4C2 Profilo organizzativo")
+        self.geometry("780x620")
+        self.transient(master)
+        self.grab_set()
+
+        self.result = None
+        self.profile = profile
+
+        container = ttk.Frame(self, padding=14)
+        container.pack(fill="both", expand=True)
+
+        ttk.Label(
+            container,
+            text="Profilo: %s" % profile.name,
+            font=("Segoe UI", 13, "bold")
+        ).pack(anchor="w", pady=(0, 4))
+
+        ttk.Label(
+            container,
+            text=profile.description,
+            foreground="#555555",
+            wraplength=720
+        ).pack(anchor="w", pady=(0, 10))
+
+        # Profile summary
+        summary_lines = []
+        summary_lines.append("Cartelle top-level: %d" % len(profile.folders))
+        for f in profile.folders:
+            subs = " (%s)" % ", ".join(f.subfolders) if f.subfolders else ""
+            summary_lines.append("  %s%s" % (f.name, subs))
+        summary_lines.append("")
+        summary_lines.append("Regole di classificazione: %d" % len(profile.rules))
+        summary_lines.append("")
+        summary_lines.append("Guida decisionale:")
+        for item in profile.decision_guide:
+            summary_lines.append("  %s \u2192 %s" % (item["question"], item["folder"]))
+
+        text = tk.Text(container, wrap="word", font=("Segoe UI", 10))
+        text.pack(fill="both", expand=True, pady=(0, 10))
+        text.insert("1.0", "\n".join(summary_lines))
+        text.config(state="disabled")
+
+        btns = ttk.Frame(container)
+        btns.pack(fill="x")
+
+        ttk.Button(btns, text="Esporta profilo JSON", command=self._export).pack(side="left", padx=4)
+        ttk.Button(btns, text="Importa profilo JSON", command=self._import).pack(side="left", padx=4)
+        ttk.Button(btns, text="Ripristina default", command=self._reset).pack(side="left", padx=4)
+        ttk.Button(btns, text="Chiudi", command=self.destroy).pack(side="right", padx=4)
+
+    def _export(self):
+        path = filedialog.asksaveasfilename(
+            title="Esporta profilo",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json")],
+            initialfile="profile_%s.json" % self.profile.name.replace(" ", "_").lower()
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self.profile.to_dict(), f, ensure_ascii=False, indent=2)
+            messagebox.showinfo("Esportato", "Profilo esportato in:\n%s" % path)
+        except Exception as e:
+            messagebox.showerror("Errore", "Impossibile esportare: %s" % e)
+
+    def _import(self):
+        path = filedialog.askopenfilename(
+            title="Importa profilo",
+            filetypes=[("JSON files", "*.json")]
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            new_profile = OrganizationProfile.from_dict(data)
+            if not new_profile.folders:
+                messagebox.showerror("Profilo non valido", "Il profilo non contiene cartelle.")
+                return
+            self.result = new_profile
+            messagebox.showinfo("Importato", "Profilo \"%s\" caricato. Chiudi per applicare." % new_profile.name)
+        except Exception as e:
+            messagebox.showerror("Errore", "Impossibile importare: %s" % e)
+
+    def _reset(self):
+        if messagebox.askyesno("Ripristina default", "Ripristinare il profilo Maserati Academy di default?"):
+            self.result = build_default_masaca_profile()
+            messagebox.showinfo("Ripristinato", "Profilo default ripristinato. Chiudi per applicare.")
+
+
+class TargetSelectionDialog(tk.Toplevel):
+    def __init__(self, master, profile, file_count):
+        tk.Toplevel.__init__(self, master)
+        self.title("Imposta Target Destinazione")
+        self.geometry("500x380")
+        self.transient(master)
+        self.grab_set()
+
+        self.result = None
+        self.profile = profile
+
+        frame = ttk.Frame(self, padding=14)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(
+            frame, 
+            text="Spostamento di %d file" % file_count, 
+            font=("Segoe UI", 11, "bold")
+        ).pack(anchor="w", pady=(0, 10))
+
+        ttk.Label(frame, text="1. Scegli la cartella principale:").pack(anchor="w", pady=(0, 4))
+        
+        self.top_folder_var = tk.StringVar()
+        top_folders = [f.name for f in self.profile.folders]
+        if top_folders:
+            self.top_folder_var.set(top_folders[0])
+            
+        self.combo = ttk.Combobox(frame, textvariable=self.top_folder_var, values=top_folders, state="readonly", width=40)
+        self.combo.pack(anchor="w", pady=(0, 15))
+
+        ttk.Label(frame, text="2. Aggiungi percorso interno (opzionale):").pack(anchor="w", pady=(0, 4))
+        self.sub_folder_var = tk.StringVar()
+        ttk.Entry(frame, textvariable=self.sub_folder_var, width=50).pack(anchor="w", pady=(0, 4))
+        
+        ttk.Label(
+            frame, 
+            text="Esempio: scrivendo 'Progetto\\Grecale', il file andrà in\n[Cartella Principale]\\Progetto\\Grecale\\[NomeFile]",
+            foreground="#666666",
+            font=("Segoe UI", 9)
+        ).pack(anchor="w", pady=(0, 20))
+
+        btns = ttk.Frame(frame)
+        btns.pack(fill="x", side="bottom")
+
+        ttk.Button(btns, text="Annulla", command=self.destroy).pack(side="right", padx=4)
+        ttk.Button(btns, text="Applica Target", style="Primary.TButton", command=self.on_apply).pack(side="right", padx=4)
+
+    def on_apply(self):
+        top = self.top_folder_var.get().strip()
+        sub = self.sub_folder_var.get().strip()
+
+        # Input validation for subfolder
+        if sub:
+            for ch in ['<', '>', ':', '"', '|', '?', '*']:
+                if ch in sub:
+                    messagebox.showerror(
+                        "Caratteri non validi",
+                        "Il percorso contiene un carattere non valido: '%s'" % ch
+                    )
+                    return
+            if '..' in sub:
+                messagebox.showerror("Percorso non valido", "Il percorso non può contenere '..'")
+                return
+
+        path = top
+        if sub:
+            path = top + "\\" + sub.strip("\\/")
+            
+        self.result = normalize_rel_path(path)
         self.destroy()
 
 
@@ -1154,7 +1700,8 @@ class App(tk.Tk):
 
         self.records = []
         self.plans = []
-        self.rule_engine = RuleEngine()
+        self.profile = _DEFAULT_PROFILE
+        self.rule_engine = RuleEngine(self.profile.rules)
         self.stop_requested = False
         self.ai_settings = AISettings()
         self.objectives_text = DEFAULT_OBJECTIVES
@@ -1174,7 +1721,7 @@ class App(tk.Tk):
         self._apply_theme()
         self._load_settings()
         self._build_ui()
-        logger.info("Application started (v%s). Log file: %s", APP_VERSION, _LOG_FILE)
+        logger.info("Application started (v%s). Profile: %s. Log file: %s", APP_VERSION, self.profile.name, _LOG_FILE)
 
     def _apply_theme(self):
         style = ttk.Style(self)
@@ -1431,6 +1978,8 @@ class App(tk.Tk):
 
         ttk.Button(frame, text="Obiettivi AI", style="Small.TButton",
                    command=self.edit_objectives).pack(side="left")
+        ttk.Button(frame, text="\U0001F4C2 Profilo", style="Small.TButton",
+                   command=self.manage_profile).pack(side="left", padx=4)
 
         # Progress + status (right side)
         self.progress_bar = ttk.Progressbar(frame, length=180, mode="indeterminate")
@@ -1525,7 +2074,7 @@ class App(tk.Tk):
     # ---------- Help / Settings ----------
 
     def open_help(self):
-        HelpWindow(self)
+        HelpWindow(self, profile=self.profile)
 
     def configure_ai(self):
         dialog = AISettingsDialog(self, self.ai_settings)
@@ -1547,6 +2096,21 @@ class App(tk.Tk):
             self._save_settings()
             self.status_var.set("Obiettivi AI aggiornati e salvati.")
 
+    def manage_profile(self):
+        dialog = ProfileViewerDialog(self, self.profile)
+        self.wait_window(dialog)
+        if dialog.result is not None:
+            self._apply_profile(dialog.result)
+            self._save_settings()
+            self.status_var.set("Profilo aggiornato: %s" % self.profile.name)
+
+    def _apply_profile(self, profile):
+        self.profile = profile
+        self.rule_engine = RuleEngine(profile.rules)
+        self.objectives_text = profile.objectives
+        logger.info("Profile applied: %s (%d folders, %d rules)",
+                    profile.name, len(profile.folders), len(profile.rules))
+
     # ---------- Settings persistence ----------
 
     def _settings_file(self):
@@ -1554,6 +2118,7 @@ class App(tk.Tk):
 
     def _save_settings(self):
         data = {
+            "provider": self.ai_settings.provider,
             "api_key": self.ai_settings.api_key,
             "model": self.ai_settings.model,
             "max_chunk_size": self.ai_settings.max_chunk_size,
@@ -1564,6 +2129,9 @@ class App(tk.Tk):
             "objectives": self.objectives_text,
             "last_root": self.root_dir.get(),
         }
+        # Save custom profile if it differs from default
+        if self.profile.name != _DEFAULT_PROFILE.name or self.profile.to_dict() != _DEFAULT_PROFILE.to_dict():
+            data["custom_profile"] = self.profile.to_dict()
         try:
             path = self._settings_file()
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1581,8 +2149,9 @@ class App(tk.Tk):
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.ai_settings = AISettings(
+                provider=data.get("provider", "OpenAI"),
                 api_key=data.get("api_key", ""),
-                model=data.get("model", "gpt-5.4"),
+                model=data.get("model", "gpt-4o"),
                 max_chunk_size=int(data.get("max_chunk_size", 180)),
                 confidence_threshold=float(data.get("confidence_threshold", 0.72)),
                 include_size=bool(data.get("include_size", True)),
@@ -1593,6 +2162,15 @@ class App(tk.Tk):
                 self.objectives_text = data["objectives"]
             if data.get("last_root"):
                 self.root_dir.set(data["last_root"])
+            # Load custom profile if present
+            if data.get("custom_profile"):
+                try:
+                    loaded = OrganizationProfile.from_dict(data["custom_profile"])
+                    if loaded.folders:
+                        self._apply_profile(loaded)
+                        logger.info("Loaded custom profile: %s", loaded.name)
+                except Exception as pe:
+                    logger.warning("Could not load custom profile: %s", pe)
             logger.info("Settings loaded from %s", path)
         except Exception as e:
             logger.warning("Could not load settings: %s", e)
@@ -1700,7 +2278,7 @@ class App(tk.Tk):
 
         def worker():
             try:
-                planner = AIPlanner(self.ai_settings)
+                planner = AIPlanner(self.ai_settings, profile=self.profile)
                 result = planner.generate_ai_plan(self.records, self.objectives_text, progress_callback=progress)
                 self.last_ai_strategic = result.get("strategic")
                 self.after(0, lambda: self._apply_ai_result(root, result))
@@ -1973,42 +2551,25 @@ class App(tk.Tk):
         if not self.records:
             return
 
-        rel_target = simpledialog.askstring(
-            "Imposta target",
-            "Inserisci il percorso target relativo per le righe selezionate.\n\n"
-            "Esempio:\n03_Training_Programs\\MC20\\2025"
-        )
-        if rel_target is None or not rel_target.strip():
-            return
-
-        rel_target = rel_target.strip()
-
-        # Input validation
-        for ch in ['<', '>', ':', '"', '|', '?', '*']:
-            if ch in rel_target:
-                messagebox.showerror(
-                    "Caratteri non validi",
-                    "Il percorso contiene il carattere non valido: '%s'\n\n"
-                    "Caratteri vietati: < > : \" | ? *" % ch
-                )
-                return
-
-        if '..' in rel_target:
-            messagebox.showerror("Percorso non valido",
-                                 "Il percorso non pu\u00f2 contenere '..' per motivi di sicurezza.")
-            return
-
         selected_items = self.tree.selection()
         if not selected_items:
             messagebox.showwarning("Nessuna selezione", "Seleziona prima una o pi\u00f9 righe.")
             return
+
+        dialog = TargetSelectionDialog(self, self.profile, len(selected_items))
+        self.wait_window(dialog)
+        
+        if not dialog.result:
+            return
+
+        rel_target_dir = dialog.result
 
         self._save_undo_state()
         source_paths = set([self.tree.item(item, "values")[1] for item in selected_items])
 
         for record in self.records:
             if record.source_path in source_paths:
-                record.suggested_target_rel = normalize_rel_path(rel_target + "\\" + record.name)
+                record.suggested_target_rel = normalize_rel_path(rel_target_dir + "\\" + record.name)
                 record.decision_source = "manual"
                 record.ai_reason = "Manual target override"
                 record.ai_confidence = 1.0
